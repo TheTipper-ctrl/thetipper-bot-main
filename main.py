@@ -1,74 +1,37 @@
 import os
-import logging
-import requests
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import telebot
+from flask import Flask
+import threading
 
-# Environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")  # optional for predictions
+# Create Flask app (dummy server for Render)
+app = Flask(__name__)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+@app.route('/')
+def home():
+    return "Tipper Bot is alive!"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🕴️ Welcome to The Tipper — your underworld plug for high‑odds football predictions.\n"
-        "Commands:\n"
-        "/start - Welcome message\n"
-        "/ping - Check bot is alive\n"
-        "/predict <league_id> <fixture_id> - Get predictions (requires API key)\n"
-    )
+# Start the Telegram bot
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("No BOT_TOKEN found. Please set BOT_TOKEN in environment variables.")
 
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Pong! ✅")
+bot = telebot.TeleBot(BOT_TOKEN)
 
-def fetch_prediction(league_id, fixture_id):
-    if not API_FOOTBALL_KEY:
-        return None, 'API key not configured.'
-    url = f"https://v3.api-football.com/predictions?league={league_id}&fixture={fixture_id}"
-    headers = {"x-apisports-key": API_FOOTBALL_KEY}
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data, None
-    except Exception as e:
-        return None, str(e)
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.reply_to(message, "Hello! I’m your Tipper Bot 🤖. How can I assist you today?")
 
-async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 2:
-        await update.message.reply_text("Usage: /predict <league_id> <fixture_id>")
-        return
-    league_id, fixture_id = context.args
-    data, err = fetch_prediction(league_id, fixture_id)
-    if err:
-        await update.message.reply_text(f"Prediction error: {err}")
-        return
-    # Basic formatting (depends on API response)
-    try:
-        resp = data.get('response', [])
-        if not resp:
-            await update.message.reply_text('No prediction data returned.')
-            return
-        p = resp[0].get('predictions', {})
-        message = '*Predictions*\n'
-        for k, v in p.items():
-            message += f"{k}: {v}\n"
-        await update.message.reply_text(message, parse_mode='Markdown')
-    except Exception as e:
-        await update.message.reply_text(f'Error parsing prediction: {e}')
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    bot.reply_to(message, message.text)
 
-def main():
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set. Exiting.")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("predict", predict))
-    logger.info("Bot starting...")
-    app.run_polling()
+def run_bot():
+    bot.polling(none_stop=True)
 
-if __name__ == '__main__':
-    main()
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+# Run both Flask and Telegram bot in parallel
+if __name__ == "__main__":
+    threading.Thread(target=run_bot).start()
+    run_flask()
